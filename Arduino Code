@@ -1,0 +1,120 @@
+#include <Dps310.h>//default i2c address 0x77
+#include <WiFi.h>
+#include <NetworkClient.h>
+#include <WiFiAP.h> ////Will be set at a later date
+
+// Dps310 Opject
+Dps310 Dps310PressureSensor = Dps310();
+
+const char *ssid = "rocket_alt";
+const char *password = "rocketgobrr";
+int i,n,k = 0;
+NetworkServer server(80);
+
+float log_array[7500][2] = {0}; //array to store measurements
+unsigned long time_c;
+uint8_t oversampling = 5; //oversampling means that the sensor takes 2^5 measurements and finds RMS value (Can play with variences to see what best fits)
+float pressure, pressure_min, pressure_max;
+
+
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+  Dps310PressureSensor.begin(Wire);
+  Serial.println("Init complete!");
+
+  if (!WiFi.softAP(ssid, password)) { //initialize ssid and password, log error message if AP creation failed
+    log_e("Soft AP creation failed.");
+    while (1);
+  }
+  IPAddress myIP = WiFi.softAPIP();
+  server.begin();
+  Dps310PressureSensor.measurePressureOnce(pressure, oversampling);
+  pressure_min = pressure;  //initialize values of min and max pressure
+  pressure_max = pressure;
+}
+
+void loop(){ //pressure monitoring during flight
+  while (i<7500){
+    Dps310PressureSensor.measurePressureOnce(pressure, oversampling);
+    log_array[i][0]=millis();
+    log_array[i][1]=pressure;
+    Serial.println(pressure);
+    if (pressure > pressure_max){
+      pressure_max = pressure;
+    }
+    if (pressure < pressure_min){
+      pressure_min = pressure;
+    }
+    i++;
+    n++;
+
+    check_client();
+
+    if (i==7497){ //overwrite first measurements if RAM is maxed out. Prevents over-analyis and loss of data
+      i = 0;
+    }
+
+    if (n == 100){ //every 100 measurements (~every 7 seconds) check if the pressure changed by 10hPa (~3 feet @ sea level)
+      n = 0;
+      if (pressure_max - pressure_min < 10){  //if the change in pressure in the last 7s haven't changed signifficantly, discard the last 100 measurements
+        i -= 100;
+      }
+      if (i < 0){ //if i somehow became < 0, reset back to 0 
+        i = 0;
+      }
+
+      pressure_min = pressure;  //reset max and min pressure readings to the current pressure reading
+      pressure_max = pressure;
+    }
+  }
+}
+
+void check_client(){
+  NetworkClient client = server.accept();  // listen for incoming clients
+
+  if (client) {                     // if you get a client,
+    Serial.println("New Client.");  // print a message out the serial port
+    String currentLine = "";        // make a String to hold incoming data from the client
+    while (client.connected()) {    // loop while the client's connected
+      if (client.available()) {     // if there's bytes to read from the client,
+        char c = client.read();     // read a byte, then
+        Serial.write(c);            // print it out the serial monitor
+        if (c == '\n') {            // if the byte is a newline character
+
+          // if the current line is blank, you got two newline characters in a row.
+          // that's the end of the client HTTP request, so send a response:
+          if (currentLine.length() == 0) {
+            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
+            // and a content-type so the client knows what's coming, then a blank line:
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println();
+
+            while (k<i){
+              client.print(log_array[k][0]);
+              client.print(",");
+              client.print(log_array[k][1]);
+              client.print("<br>");
+              k++;
+            }
+            k=0;
+            // The HTTP response ends with another blank line:
+            client.println();
+            // break out of the while loop:
+            break;
+          } else {  // if you got a newline, then clear currentLine:
+            currentLine = "";
+          }
+        } else if (c != '\r') {  // if you got anything else but a carriage return character,
+          currentLine += c;      // add it to the end of the currentLine
+        }
+      }
+    }
+    // close the connection:
+    client.stop();
+    //Serial.println("Client Disconnected.");
+  }
+}
+
