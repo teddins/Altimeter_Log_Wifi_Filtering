@@ -1,4 +1,4 @@
-# Altimeter_Log_Wifi_Filtering
+# Altimeter_Log
 Rocket Altimeter and Log
 
 This project is designed for a rocket altimeter logging system using a Dps310 pressure sensor, an ESP32 microcontroller, and a WiFi access point. The system logs pressure measurements during flight and provides real-time data access via a web server.
